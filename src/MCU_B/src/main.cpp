@@ -173,13 +173,11 @@ void button_thread(void *parameters){
 	Serial.println("button_thread");
 
 	while(true){
-		if(button_pressed){
-			Serial.println("button pressed.");
-			servomotor.write(SERVO_0);
-			button_pressed = false;
-		}
+		// Wait for the call of xSemaphoreGiveFromISR from button_reset_lever.
+		xSemaphoreTake(sem_button_pressed, portMAX_DELAY);
 
-		vTaskDelay(100 / portTICK_PERIOD_MS);
+		Serial.println("button pressed.");
+		servomotor.write(SERVO_0);
 	}
 }
 
