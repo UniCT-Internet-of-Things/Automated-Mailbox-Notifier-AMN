@@ -114,20 +114,29 @@ void parseLoraPacket() {
 
 	if (notification.type == MessageType::MESSAGE && notification.sequence_number > last_sequence_number) {
 		last_sequence_number = notification.sequence_number;
+
+		// The percentage is in notification.payload[0];
 		battery_percentage = notification.payload[0];
 
+		// notification.payload[1] > 0 means that a letter has been detected.
 		if(notification.payload[1] > 0){
 			char tmp[64];
 			sprintf(tmp, "C'è posta per te! (%d)", battery_percentage);
 
-			bot.sendMessage(CHAT_ID, tmp, "");
+			Serial.println("Rising lever...");
 			triggerLever();
+
+			Serial.printf("Sending ACK with sequence number %d.\n", last_sequence_number);
+			sendAck();
+
+			Serial.print("Sending telegram notification... ");
+			if(bot.sendMessage(CHAT_ID, tmp, ""))
+				Serial.println("Ok");
+			
+			else
+				Serial.println("Failed");
 		}
 	}
-
-	Serial.print("Sending ACK with sequence number ");
-	Serial.println(last_sequence_number);
-	sendAck();
 }
 
 void IRAM_ATTR button_reset_lever() {
