@@ -94,9 +94,10 @@ void initializeLoraModule() {
 }
 
 void sendAck() {
-	LoRa.beginPacket();
 	notification.type = MessageType::ACK;
 	notification.sequence_number = last_sequence_number;
+
+	LoRa.beginPacket();
 	LoRa.write((uint8_t *) &notification, sizeof(notification));
 	LoRa.endPacket();
 }
