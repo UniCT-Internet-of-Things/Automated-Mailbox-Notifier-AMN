@@ -20,45 +20,8 @@ UniversalTelegramBot bot(BOT_TOKEN, secured_client);
 Servo servomotor;
 notification_t notification;
 
-bool lever_triggered  = false;
-bool button_pressed   = false;
-
 uint32_t last_sequence_number = 0;
 uint8_t battery_percentage = 100;
-
-inline void setup_IPCs(){
-	// Sampling semaphore.
-	// xSemaphoreCreateBinary initializes to ZERO.
-	// This is fine as it is a binary semaphore.
-	sem_button_pressed = xSemaphoreCreateBinary();
-}
-
-// Spawn the needed threads and kill the spawner thread.
-inline void spawn_threads(){
-	/*
-		Parameters:
-			Function to implement the task.
-			Name of the task.
-			Stack size in bytes (words in vanilla FreeRTOS).
-			Task input parameter.
-			Priority of the task.
-			Task handle.
-			Core where the task should run.
-	*/
-
-	xTaskCreatePinnedToCore(button_thread,	"button_thread",	10240,	NULL,	1,	&button_thread_handle,	APP_CPU);
-	xTaskCreatePinnedToCore(lora_thread,		"lora_thread",		10240,	NULL,	1,	&lora_thread_handle,		PRO_CPU);
-
-	// Deleting the spawner thread (setup thread).
-	vTaskDelete(NULL);
-}
-
-void triggerLever() {
-	if (lever_triggered) return;
-
-	lever_triggered = true;
-	servomotor.write(SERVO_90);
-}
 
 void initializeSecureClient() {
 	IPAddress stat_ip(192, 168, 1, 184);
@@ -85,12 +48,41 @@ void initializeSecureClient() {
 
 void initializeLoraModule() {
 	LoRa.setPins(SS, RST, DIO0);
+
 	while (!LoRa.begin(866E6)) {
 		Serial.println(".");
 		delay(500);
 	}
+
 	LoRa.setSyncWord(0xF3);
 	Serial.println("LoRa Initializing OK!");
+}
+
+inline void setup_IPCs(){
+	// Sampling semaphore.
+	// xSemaphoreCreateBinary initializes to ZERO.
+	// This is fine as it is a binary semaphore.
+	sem_button_pressed = xSemaphoreCreateBinary();
+}
+
+// Spawn the needed threads and kill the spawner thread.
+inline void spawn_threads(){
+	/*
+		Parameters:
+			Function to implement the task.
+			Name of the task.
+			Stack size in bytes (words in vanilla FreeRTOS).
+			Task input parameter.
+			Priority of the task.
+			Task handle.
+			Core where the task should run.
+	*/
+
+	xTaskCreatePinnedToCore(button_thread,	"button_thread",	10240,	NULL,	1,	&button_thread_handle,	APP_CPU);
+	xTaskCreatePinnedToCore(lora_thread,		"lora_thread",		10240,	NULL,	1,	&lora_thread_handle,		PRO_CPU);
+
+	// Deleting the spawner thread (setup thread).
+	vTaskDelete(NULL);
 }
 
 void sendAck() {
@@ -126,7 +118,7 @@ void parseLoraPacket() {
 			sprintf(tmp, "C'è posta per te! (%d)", battery_percentage);
 
 			Serial.println("Rising lever...");
-			triggerLever();
+			servomotor.write(SERVO_90);
 
 			Serial.printf("Sending ACK with sequence number %d.\n", last_sequence_number);
 			sendAck();
@@ -134,7 +126,7 @@ void parseLoraPacket() {
 			Serial.print("Sending telegram notification... ");
 			if(bot.sendMessage(CHAT_ID, tmp, ""))
 				Serial.println("Ok");
-			
+
 			else
 				Serial.println("Failed");
 		}
@@ -142,8 +134,6 @@ void parseLoraPacket() {
 }
 
 void IRAM_ATTR button_reset_lever() {
-	lever_triggered = false;
-
 	// Handle button press event.
 	BaseType_t task_woken = pdFALSE;
 
@@ -152,7 +142,7 @@ void IRAM_ATTR button_reset_lever() {
 	// this error will be printed out.
 	if(xSemaphoreGiveFromISR(sem_button_pressed, &task_woken) == errQUEUE_FULL)
 		Serial.println("errQUEUE_FULL in xSemaphoreGiveFromISR.");
-	
+
 	// API to implement deferred interrupt.
 	// Exit from ISR (Vanilla FreeRTOS).
 	// portYIELD_FROM_ISR(task_woken);
