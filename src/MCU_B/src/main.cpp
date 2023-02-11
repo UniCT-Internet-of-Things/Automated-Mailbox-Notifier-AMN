@@ -101,6 +101,7 @@ void sendAck() {
 	LoRa.endPacket();
 }
 
+// Process a LoRa packet and send notifications.
 void parseLoraPacket() {
 	int packet_size = LoRa.parsePacket();
 	if (packet_size < 1) return;
