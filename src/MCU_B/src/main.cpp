@@ -54,14 +54,84 @@ inline void spawn_threads(){
 }
 
 void triggerLever() {
-  if (lever_triggered) return;
+	if (lever_triggered) return;
 
-  lever_triggered = true;
-  servomotor.write(SERVO_90);
+	lever_triggered = true;
+	servomotor.write(SERVO_90);
+}
+
+void initializeSecureClient() {
+	IPAddress stat_ip(192, 168, 1, 184);
+	IPAddress gatw_ip(192, 168, 1, 1);
+	IPAddress subnetx(255, 255, 0, 0);
+	IPAddress mainDNS(8, 8, 8, 8);
+	IPAddress secnDNS(8, 8, 4, 4);
+
+	if (!WiFi.config(stat_ip, gatw_ip, subnetx, mainDNS, secnDNS)) {
+		Serial.println("STA Failed to configure");
+	}
+
+	WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+	secured_client.setCACert(TELEGRAM_CERTIFICATE_ROOT);
+	while (WiFi.status() != WL_CONNECTED)
+	{
+		Serial.print(".");
+		delay(500);
+	}
+
+	Serial.print("IP Address: ");
+	Serial.println(WiFi.localIP());
+}
+
+void initializeLoraModule() {
+	LoRa.setPins(SS, RST, DIO0);
+	while (!LoRa.begin(866E6)) {
+		Serial.println(".");
+		delay(500);
+	}
+	LoRa.setSyncWord(0xF3);
+	Serial.println("LoRa Initializing OK!");
+}
+
+void sendAck() {
+	LoRa.beginPacket();
+	notification.type = MessageType::ACK;
+	notification.sequence_number = last_sequence_number;
+	LoRa.write((uint8_t *) &notification, sizeof(notification));
+	LoRa.endPacket();
+}
+
+void parseLoraPacket() {
+	int packet_size = LoRa.parsePacket();
+	if (packet_size < 1) return;
+
+	Serial.println("packet received.");
+	while (LoRa.available()) {
+		LoRa.readBytes((uint8_t *) &notification, sizeof(notification));
+	}
+
+	Serial.printf("Received packet with sequence number %d.\n", notification.sequence_number);
+
+	if (notification.type == MessageType::MESSAGE && notification.sequence_number > last_sequence_number) {
+		last_sequence_number = notification.sequence_number;
+		battery_percentage = notification.payload[0];
+
+		if(notification.payload[1] > 0){
+			char tmp[64];
+			sprintf(tmp, "C'è posta per te! (%d)", battery_percentage);
+
+			bot.sendMessage(CHAT_ID, tmp, "");
+			triggerLever();
+		}
+	}
+
+	Serial.print("Sending ACK with sequence number ");
+	Serial.println(last_sequence_number);
+	sendAck();
 }
 
 void IRAM_ATTR button_reset_lever() {
-  lever_triggered = false;
+	lever_triggered = false;
 
 	// Handle button press event.
 	BaseType_t task_woken = pdFALSE;
@@ -71,99 +141,28 @@ void IRAM_ATTR button_reset_lever() {
 	// this error will be printed out.
 	if(xSemaphoreGiveFromISR(sem_button_pressed, &task_woken) == errQUEUE_FULL)
 		Serial.println("errQUEUE_FULL in xSemaphoreGiveFromISR.");
-  
+	
 	// API to implement deferred interrupt.
-  // Exit from ISR (Vanilla FreeRTOS).
-  // portYIELD_FROM_ISR(task_woken);
+	// Exit from ISR (Vanilla FreeRTOS).
+	// portYIELD_FROM_ISR(task_woken);
 
-  // Exit from ISR (ESP-IDF).
-  if(task_woken)
-    portYIELD_FROM_ISR();
-}
-
-void initializeSecureClient() {
-  IPAddress stat_ip(192, 168, 1, 184);
-  IPAddress gatw_ip(192, 168, 1, 1);
-  IPAddress subnetx(255, 255, 0, 0);
-  IPAddress mainDNS(8, 8, 8, 8);
-  IPAddress secnDNS(8, 8, 4, 4);
-
-  if (!WiFi.config(stat_ip, gatw_ip, subnetx, mainDNS, secnDNS)) {
-    Serial.println("STA Failed to configure");
-  }
-
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  secured_client.setCACert(TELEGRAM_CERTIFICATE_ROOT);
-  while (WiFi.status() != WL_CONNECTED)
-  {
-    Serial.print(".");
-    delay(500);
-  }
-
-  Serial.print("IP Address: ");
-  Serial.println(WiFi.localIP());
-}
-
-void initializeLoraModule() {
-  LoRa.setPins(SS, RST, DIO0);
-  while (!LoRa.begin(866E6)) {
-		Serial.println(".");
-		delay(500);
-  }
-  LoRa.setSyncWord(0xF3);
-  Serial.println("LoRa Initializing OK!");
-}
-
-void sendAck() {
-  LoRa.beginPacket();
-  notification.type = MessageType::ACK;
-  notification.sequence_number = last_sequence_number;
-  LoRa.write((uint8_t *) &notification, sizeof(notification));
-  LoRa.endPacket();
-}
-
-void parseLoraPacket() {
-  int packet_size = LoRa.parsePacket();
-  if (packet_size < 1) return;
-
-  Serial.println("packet received.");
-  while (LoRa.available()) {
-    LoRa.readBytes((uint8_t *) &notification, sizeof(notification));
-  }
-
-  Serial.print("Received packet with sequence number ");
-  Serial.println(notification.sequence_number);
-
-  if (notification.type == MessageType::MESSAGE && notification.sequence_number > last_sequence_number) {
-    last_sequence_number = notification.sequence_number;
-		battery_percentage = notification.payload[0];
-
-		if(notification.payload[1] > 0){
-			char tmp[64];
-			sprintf(tmp, "C'è posta per te! (%d)", battery_percentage);
-
-			bot.sendMessage(CHAT_ID, tmp, "");
-    	triggerLever();
-		}
-  }
-
-  Serial.print("Sending ACK with sequence number ");
-  Serial.println(last_sequence_number);
-  sendAck();
+	// Exit from ISR (ESP-IDF).
+	if(task_woken)
+		portYIELD_FROM_ISR();
 }
 
 void loop(){}
 void setup(){
-  Serial.begin(115200);
-  pinMode(BUTTON_PIN, INPUT_PULLUP);
-  attachInterrupt(BUTTON_PIN, button_reset_lever, FALLING);
-  interrupts();
+	Serial.begin(115200);
+	pinMode(BUTTON_PIN, INPUT_PULLUP);
+	attachInterrupt(BUTTON_PIN, button_reset_lever, FALLING);
+	interrupts();
 
-  servomotor.attach(SERVOM_PIN);
-  servomotor.write(SERVO_0);
+	servomotor.attach(SERVOM_PIN);
+	servomotor.write(SERVO_0);
 
-  initializeSecureClient();
-  initializeLoraModule();
+	initializeSecureClient();
+	initializeLoraModule();
 
 	setup_IPCs();
 	spawn_threads();
