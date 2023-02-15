@@ -5,39 +5,37 @@
 #include <Servo.h>
 #include <LoRa.h>
 
+#include <telegram_api.h>
 #include <const.h>
 #include "../../include/common.h"
+
+// TODO: sistemare leva buggata, sistemare wifi manager, sistemare altro firmware con payload > 0.
 
 // Threads.
 void button_thread(void*), lora_thread(void*);
 TaskHandle_t button_thread_handle, lora_thread_handle;
 
 WiFiClientSecure secured_client;
-UniversalTelegramBot bot(BOT_TOKEN, secured_client);
+UniversalTelegramBot *bot;
 notification_t notification;
 
 uint32_t last_sequence_number = 0;
 uint8_t battery_percentage = 100;
 
 void initializeSecureClient(){
-	IPAddress stat_ip(192, 168, 1, 184);
-	IPAddress gatw_ip(192, 168, 1, 1);
-	IPAddress subnetx(255, 255, 0, 0);
-	IPAddress mainDNS(8, 8, 8, 8);
-	IPAddress secnDNS(8, 8, 4, 4);
-
-	if (!WiFi.config(stat_ip, gatw_ip, subnetx, mainDNS, secnDNS)) {
-		Serial.println("STA Failed to configure");
-	}
-
+	Serial.print("Initializing WiFi");
+	WiFi.mode(WIFI_STA);
 	WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
 	secured_client.setCACert(TELEGRAM_CERTIFICATE_ROOT);
-	while (WiFi.status() != WL_CONNECTED)
-	{
+	bot = new UniversalTelegramBot(BOT_TOKEN, secured_client);
+
+	while(WiFi.status() != WL_CONNECTED){
 		Serial.print(".");
 		delay(500);
 	}
 
+	Serial.println();
 	Serial.print("IP Address: ");
 	Serial.println(WiFi.localIP());
 }
@@ -45,13 +43,14 @@ void initializeSecureClient(){
 void initializeLoraModule(){
 	LoRa.setPins(SS, RST, DIO0);
 
+	Serial.print("Initializing LoRa");
 	while (!LoRa.begin(866E6)) {
 		Serial.println(".");
 		delay(500);
 	}
 
 	LoRa.setSyncWord(0xF3);
-	Serial.println("LoRa Initializing OK!");
+	Serial.println("\nLoRa Initializing OK!");
 }
 
 // Spawn the needed threads and kill the spawner thread.
@@ -68,7 +67,7 @@ inline void spawn_threads(){
 	*/
 
 	xTaskCreatePinnedToCore(button_thread,	"button_thread",	10240,	NULL,	1,	&button_thread_handle,	APP_CPU);
-	// xTaskCreatePinnedToCore(lora_thread,		"lora_thread",		10240,	NULL,	1,	&lora_thread_handle,		PRO_CPU);
+	xTaskCreatePinnedToCore(lora_thread,		"lora_thread",		10240,	NULL,	1,	&lora_thread_handle,		PRO_CPU);
 
 	// Deleting the spawner thread (setup thread).
 	vTaskDelete(NULL);
@@ -99,13 +98,13 @@ void parseLoraPacket(){
 	if (packet_size < 1) return;
 
 	Serial.println("packet received.");
-	while (LoRa.available()) {
+	while (LoRa.available()){
 		LoRa.readBytes((uint8_t *) &notification, sizeof(notification));
 	}
 
 	Serial.printf("Received packet with sequence number %d.\n", notification.sequence_number);
-
-	if (notification.type == MessageType::MESSAGE && notification.sequence_number > last_sequence_number) {
+	
+	if(notification.type == MessageType::MESSAGE && notification.sequence_number > last_sequence_number){
 		last_sequence_number = notification.sequence_number;
 
 		// The percentage is in notification.payload[0];
@@ -113,23 +112,23 @@ void parseLoraPacket(){
 
 		// notification.payload[1] > 0 means that a letter has been detected.
 		if(notification.payload[1] > 0){
-			char tmp[64];
-			sprintf(tmp, "C'è posta per te! (%d)", battery_percentage);
-
 			Serial.println("Rising lever...");
 			servoWrite(SERVO_PIN, SERVO_90);
 
-			Serial.printf("Sending ACK with sequence number %d.\n", last_sequence_number);
-			sendAck();
+			char tmp[64];
+			sprintf(tmp, "C'è posta per te! (batteria: %d%)", battery_percentage);
 
 			Serial.print("Sending telegram notification... ");
-			if(bot.sendMessage(CHAT_ID, tmp, ""))
+			if(bot->sendMessage(CHAT_ID, tmp, ""))
 				Serial.println("Ok");
 
 			else
 				Serial.println("Failed");
 		}
 	}
+
+	Serial.printf("Sending ACK with sequence number %d.\n", last_sequence_number);
+	sendAck();
 }
 
 void loop(){}
@@ -138,15 +137,15 @@ void setup(){
 
 	pinMode(BUTTON_PIN, INPUT_PULLUP);
 
-	// Servo test.
+	Serial.println("Servo test.");
 	servoWrite(SERVO_PIN, SERVO_0);
 	delay(500);
 	servoWrite(SERVO_PIN, SERVO_90);
 	delay(500);
 	servoWrite(SERVO_PIN, SERVO_0);
 
-	// initializeSecureClient();
-	// initializeLoraModule();
+	initializeSecureClient();
+	initializeLoraModule();
 
 	spawn_threads();
 }
