@@ -17,7 +17,6 @@ SemaphoreHandle_t sem_button_pressed = NULL;
 
 WiFiClientSecure secured_client;
 UniversalTelegramBot bot(BOT_TOKEN, secured_client);
-Servo servomotor;
 notification_t notification;
 
 uint32_t last_sequence_number = 0;
@@ -94,6 +93,16 @@ void sendAck() {
 	LoRa.endPacket();
 }
 
+void servoWrite(uint8_t pin, uint16_t degrees){
+	Servo servo;
+
+	servo.attach(pin);
+	servo.write(degrees);
+	delay(1000);
+
+	servo.detach();
+}
+
 // Process a LoRa packet and send notifications.
 void parseLoraPacket() {
 	int packet_size = LoRa.parsePacket();
@@ -118,7 +127,7 @@ void parseLoraPacket() {
 			sprintf(tmp, "C'è posta per te! (%d)", battery_percentage);
 
 			Serial.println("Rising lever...");
-			servomotor.write(SERVO_90);
+			servoWrite(SERVO_PIN, SERVO_90);
 
 			Serial.printf("Sending ACK with sequence number %d.\n", last_sequence_number);
 			sendAck();
@@ -159,8 +168,7 @@ void setup(){
 	attachInterrupt(BUTTON_PIN, button_reset_lever, FALLING);
 	interrupts();
 
-	servomotor.attach(SERVOM_PIN);
-	servomotor.write(SERVO_0);
+	servoWrite(SERVO_PIN, SERVO_0);
 
 	initializeSecureClient();
 	initializeLoraModule();
@@ -177,7 +185,7 @@ void button_thread(void *parameters){
 		xSemaphoreTake(sem_button_pressed, portMAX_DELAY);
 
 		Serial.println("button pressed.");
-		servomotor.write(SERVO_0);
+		servoWrite(SERVO_PIN, SERVO_0);
 	}
 }
 
