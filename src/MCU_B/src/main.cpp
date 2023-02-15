@@ -1,15 +1,13 @@
 #include <Arduino.h>
-#include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <UniversalTelegramBot.h>
 #include <Servo.h>
 #include <LoRa.h>
 
+#include <WiFiManager.h>
 #include <telegram_api.h>
 #include <const.h>
 #include "../../include/common.h"
-
-// TODO: sistemare leva buggata, sistemare wifi manager, sistemare altro firmware con payload > 0.
 
 // Threads.
 void button_thread(void*), lora_thread(void*);
@@ -18,22 +16,14 @@ TaskHandle_t button_thread_handle, lora_thread_handle;
 WiFiClientSecure secured_client;
 UniversalTelegramBot *bot;
 notification_t notification;
+WiFiManager wifiManager;
 
 uint32_t last_sequence_number = 0;
 uint8_t battery_percentage = 100;
 
 void initializeSecureClient(){
-	Serial.print("Initializing WiFi");
-	WiFi.mode(WIFI_STA);
-	WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-
 	secured_client.setCACert(TELEGRAM_CERTIFICATE_ROOT);
 	bot = new UniversalTelegramBot(BOT_TOKEN, secured_client);
-
-	while(WiFi.status() != WL_CONNECTED){
-		Serial.print(".");
-		delay(500);
-	}
 
 	Serial.println();
 	Serial.print("IP Address: ");
@@ -114,9 +104,10 @@ void parseLoraPacket(){
 		if(notification.payload[1] > 0){
 			Serial.println("Rising lever...");
 			servoWrite(SERVO_PIN, SERVO_90);
+			servoWrite(SERVO_PIN, SERVO_90);
 
 			char tmp[64];
-			sprintf(tmp, "C'è posta per te! (batteria: %d%)", battery_percentage);
+			sprintf(tmp, "C'è posta per te! (batteria: %d/%)", battery_percentage);
 
 			Serial.print("Sending telegram notification... ");
 			if(bot->sendMessage(CHAT_ID, tmp, ""))
@@ -134,20 +125,24 @@ void parseLoraPacket(){
 void loop(){}
 void setup(){
 	Serial.begin(115200);
+	EEPROM.begin(EEPROM_SIZE);
+	wifiManager.begin();
 
-	pinMode(BUTTON_PIN, INPUT_PULLUP);
+	if(wifiManager.isConnected()) {
+		pinMode(BUTTON_PIN, INPUT_PULLUP);
 
-	Serial.println("Servo test.");
-	servoWrite(SERVO_PIN, SERVO_0);
-	delay(500);
-	servoWrite(SERVO_PIN, SERVO_90);
-	delay(500);
-	servoWrite(SERVO_PIN, SERVO_0);
+		Serial.println("Servo test.");
+		servoWrite(SERVO_PIN, SERVO_0);
+		delay(500);
+		servoWrite(SERVO_PIN, SERVO_90);
+		delay(500);
+		servoWrite(SERVO_PIN, SERVO_0);
 
-	initializeSecureClient();
-	initializeLoraModule();
+		initializeSecureClient();
+		initializeLoraModule();
 
-	spawn_threads();
+		spawn_threads();
+	}
 }
 
 void button_thread(void *parameters){
