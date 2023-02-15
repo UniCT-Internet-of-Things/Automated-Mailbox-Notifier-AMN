@@ -1,10 +1,11 @@
 #include <Arduino.h>
-#include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <UniversalTelegramBot.h>
 #include <Servo.h>
 #include <LoRa.h>
 
+#include <WiFiManager.h>
+#include <telegram_api.h>
 #include <const.h>
 #include "../../include/common.h"
 
@@ -12,25 +13,34 @@
 void button_thread(void*), lora_thread(void*);
 TaskHandle_t button_thread_handle, lora_thread_handle;
 
-// Semaphores.
-SemaphoreHandle_t sem_button_pressed = NULL;
-
 WiFiClientSecure secured_client;
-UniversalTelegramBot bot(BOT_TOKEN, secured_client);
-Servo servomotor;
+UniversalTelegramBot *bot;
 notification_t notification;
-
-bool lever_triggered  = false;
-bool button_pressed   = false;
+WiFiManager wifiManager;
 
 uint32_t last_sequence_number = 0;
 uint8_t battery_percentage = 100;
 
-inline void setup_IPCs(){
-	// Sampling semaphore.
-	// xSemaphoreCreateBinary initializes to ZERO.
-	// This is fine as it is a binary semaphore.
-	sem_button_pressed = xSemaphoreCreateBinary();
+void initializeSecureClient(){
+	secured_client.setCACert(TELEGRAM_CERTIFICATE_ROOT);
+	bot = new UniversalTelegramBot(BOT_TOKEN, secured_client);
+
+	Serial.println();
+	Serial.print("IP Address: ");
+	Serial.println(WiFi.localIP());
+}
+
+void initializeLoraModule(){
+	LoRa.setPins(SS, RST, DIO0);
+
+	Serial.print("Initializing LoRa");
+	while (!LoRa.begin(866E6)) {
+		Serial.println(".");
+		delay(500);
+	}
+
+	LoRa.setSyncWord(0xF3);
+	Serial.println("\nLoRa Initializing OK!");
 }
 
 // Spawn the needed threads and kill the spawner thread.
@@ -53,133 +63,98 @@ inline void spawn_threads(){
 	vTaskDelete(NULL);
 }
 
-void triggerLever() {
-  if (lever_triggered) return;
+void sendAck(){
+	notification.type = MessageType::ACK;
+	notification.sequence_number = last_sequence_number;
 
-  lever_triggered = true;
-  servomotor.write(SERVO_90);
+	LoRa.beginPacket();
+	LoRa.write((uint8_t *) &notification, sizeof(notification));
+	LoRa.endPacket();
 }
 
-void IRAM_ATTR button_reset_lever() {
-  lever_triggered = false;
+void servoWrite(uint8_t pin, uint16_t degrees){
+	Servo servo;
 
-	// Handle button press event.
-	BaseType_t task_woken = pdFALSE;
+	servo.attach(pin);
+	servo.write(degrees);
+	delay(1000);
 
-	// Deferred interrupt for sampling.
-	// If sample_thread can't handle the set speed,
-	// this error will be printed out.
-	if(xSemaphoreGiveFromISR(sem_button_pressed, &task_woken) == errQUEUE_FULL)
-		Serial.println("errQUEUE_FULL in xSemaphoreGiveFromISR.");
-  
-	// API to implement deferred interrupt.
-  // Exit from ISR (Vanilla FreeRTOS).
-  // portYIELD_FROM_ISR(task_woken);
-
-  // Exit from ISR (ESP-IDF).
-  if(task_woken)
-    portYIELD_FROM_ISR();
+	servo.detach();
 }
 
-void initializeSecureClient() {
-  IPAddress stat_ip(192, 168, 1, 184);
-  IPAddress gatw_ip(192, 168, 1, 1);
-  IPAddress subnetx(255, 255, 0, 0);
-  IPAddress mainDNS(8, 8, 8, 8);
-  IPAddress secnDNS(8, 8, 4, 4);
+// Process a LoRa packet and send notifications.
+void parseLoraPacket(){
+	int packet_size = LoRa.parsePacket();
+	if (packet_size < 1) return;
 
-  if (!WiFi.config(stat_ip, gatw_ip, subnetx, mainDNS, secnDNS)) {
-    Serial.println("STA Failed to configure");
-  }
+	Serial.println("packet received.");
+	while (LoRa.available()){
+		LoRa.readBytes((uint8_t *) &notification, sizeof(notification));
+	}
 
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  secured_client.setCACert(TELEGRAM_CERTIFICATE_ROOT);
-  while (WiFi.status() != WL_CONNECTED)
-  {
-    Serial.print(".");
-    delay(500);
-  }
+	Serial.printf("Received packet with sequence number %d.\n", notification.sequence_number);
+	
+	if(notification.type == MessageType::MESSAGE && notification.sequence_number > last_sequence_number){
+		last_sequence_number = notification.sequence_number;
 
-  Serial.print("IP Address: ");
-  Serial.println(WiFi.localIP());
-}
-
-void initializeLoraModule() {
-  LoRa.setPins(SS, RST, DIO0);
-  while (!LoRa.begin(866E6)) {
-		Serial.println(".");
-		delay(500);
-  }
-  LoRa.setSyncWord(0xF3);
-  Serial.println("LoRa Initializing OK!");
-}
-
-void sendAck() {
-  LoRa.beginPacket();
-  notification.type = MessageType::ACK;
-  notification.sequence_number = last_sequence_number;
-  LoRa.write((uint8_t *) &notification, sizeof(notification));
-  LoRa.endPacket();
-}
-
-void parseLoraPacket() {
-  int packet_size = LoRa.parsePacket();
-  if (packet_size < 1) return;
-
-  Serial.println("packet received.");
-  while (LoRa.available()) {
-    LoRa.readBytes((uint8_t *) &notification, sizeof(notification));
-  }
-
-  Serial.print("Received packet with sequence number ");
-  Serial.println(notification.sequence_number);
-
-  if (notification.type == MessageType::MESSAGE && notification.sequence_number > last_sequence_number) {
-    last_sequence_number = notification.sequence_number;
+		// The percentage is in notification.payload[0];
 		battery_percentage = notification.payload[0];
 
+		// notification.payload[1] > 0 means that a letter has been detected.
 		if(notification.payload[1] > 0){
+			Serial.println("Rising lever...");
+			servoWrite(SERVO_PIN, SERVO_90);
+			servoWrite(SERVO_PIN, SERVO_90);
+
 			char tmp[64];
-			sprintf(tmp, "C'è posta per te! (%d)", battery_percentage);
+			sprintf(tmp, "C'è posta per te! (batteria: %d/%)", battery_percentage);
 
-			bot.sendMessage(CHAT_ID, tmp, "");
-    	triggerLever();
+			Serial.print("Sending telegram notification... ");
+			if(bot->sendMessage(CHAT_ID, tmp, ""))
+				Serial.println("Ok");
+
+			else
+				Serial.println("Failed");
 		}
-  }
+	}
 
-  Serial.print("Sending ACK with sequence number ");
-  Serial.println(last_sequence_number);
-  sendAck();
+	Serial.printf("Sending ACK with sequence number %d.\n", last_sequence_number);
+	sendAck();
 }
 
 void loop(){}
 void setup(){
-  Serial.begin(115200);
-  pinMode(BUTTON_PIN, INPUT_PULLUP);
-  attachInterrupt(BUTTON_PIN, button_reset_lever, FALLING);
-  interrupts();
+	Serial.begin(115200);
+	EEPROM.begin(EEPROM_SIZE);
+	wifiManager.begin();
 
-  servomotor.attach(SERVOM_PIN);
-  servomotor.write(SERVO_0);
+	if(wifiManager.isConnected()) {
+		pinMode(BUTTON_PIN, INPUT_PULLUP);
 
-  initializeSecureClient();
-  initializeLoraModule();
+		Serial.println("Servo test.");
+		servoWrite(SERVO_PIN, SERVO_0);
+		delay(500);
+		servoWrite(SERVO_PIN, SERVO_90);
+		delay(500);
+		servoWrite(SERVO_PIN, SERVO_0);
 
-	setup_IPCs();
-	spawn_threads();
+		initializeSecureClient();
+		initializeLoraModule();
+
+		spawn_threads();
+	}
 }
 
 void button_thread(void *parameters){
 	Serial.println("button_thread");
 
 	while(true){
-		if(button_pressed){
-			Serial.println("button pressed.");
-			servomotor.write(SERVO_0);
-			button_pressed = false;
-		}
+		Serial.println("await button.");
+		while(digitalRead(BUTTON_PIN))
+			vTaskDelay(1000 / portTICK_PERIOD_MS);
 
-		vTaskDelay(100 / portTICK_PERIOD_MS);
+		Serial.println("button pressed.");
+		servoWrite(SERVO_PIN, SERVO_0);
 	}
 }
 
