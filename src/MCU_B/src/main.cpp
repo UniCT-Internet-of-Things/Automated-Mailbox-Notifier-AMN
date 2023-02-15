@@ -137,7 +137,13 @@ void setup(){
 	Serial.begin(115200);
 
 	pinMode(BUTTON_PIN, INPUT_PULLUP);
+
+	// Servo test.
+	servoWrite(SERVO_PIN, SERVO_0);
+	delay(500);
 	servoWrite(SERVO_PIN, SERVO_90);
+	delay(500);
+	servoWrite(SERVO_PIN, SERVO_0);
 
 	// initializeSecureClient();
 	// initializeLoraModule();
@@ -149,7 +155,6 @@ void button_thread(void *parameters){
 	Serial.println("button_thread");
 
 	while(true){
-		// Wait for the call of xSemaphoreGiveFromISR from button_ISR.
 		Serial.println("await button.");
 		while(digitalRead(BUTTON_PIN))
 			vTaskDelay(1000 / portTICK_PERIOD_MS);
