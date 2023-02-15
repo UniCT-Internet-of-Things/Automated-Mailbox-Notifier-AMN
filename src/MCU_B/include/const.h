@@ -1,5 +1,5 @@
-#define BUTTON_PIN 12
-#define SERVO_PIN 13
+#define BUTTON_PIN	14
+#define SERVO_PIN		13
 
 // Protocol CPU and app CPU.
 #define PRO_CPU 0

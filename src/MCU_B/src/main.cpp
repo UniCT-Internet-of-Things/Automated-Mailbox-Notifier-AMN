@@ -12,9 +12,6 @@
 void button_thread(void*), lora_thread(void*);
 TaskHandle_t button_thread_handle, lora_thread_handle;
 
-// Semaphores.
-SemaphoreHandle_t sem_button_pressed = NULL;
-
 WiFiClientSecure secured_client;
 UniversalTelegramBot bot(BOT_TOKEN, secured_client);
 notification_t notification;
@@ -22,7 +19,7 @@ notification_t notification;
 uint32_t last_sequence_number = 0;
 uint8_t battery_percentage = 100;
 
-void initializeSecureClient() {
+void initializeSecureClient(){
 	IPAddress stat_ip(192, 168, 1, 184);
 	IPAddress gatw_ip(192, 168, 1, 1);
 	IPAddress subnetx(255, 255, 0, 0);
@@ -45,7 +42,7 @@ void initializeSecureClient() {
 	Serial.println(WiFi.localIP());
 }
 
-void initializeLoraModule() {
+void initializeLoraModule(){
 	LoRa.setPins(SS, RST, DIO0);
 
 	while (!LoRa.begin(866E6)) {
@@ -55,13 +52,6 @@ void initializeLoraModule() {
 
 	LoRa.setSyncWord(0xF3);
 	Serial.println("LoRa Initializing OK!");
-}
-
-inline void setup_IPCs(){
-	// Sampling semaphore.
-	// xSemaphoreCreateBinary initializes to ZERO.
-	// This is fine as it is a binary semaphore.
-	sem_button_pressed = xSemaphoreCreateBinary();
 }
 
 // Spawn the needed threads and kill the spawner thread.
@@ -78,13 +68,13 @@ inline void spawn_threads(){
 	*/
 
 	xTaskCreatePinnedToCore(button_thread,	"button_thread",	10240,	NULL,	1,	&button_thread_handle,	APP_CPU);
-	xTaskCreatePinnedToCore(lora_thread,		"lora_thread",		10240,	NULL,	1,	&lora_thread_handle,		PRO_CPU);
+	// xTaskCreatePinnedToCore(lora_thread,		"lora_thread",		10240,	NULL,	1,	&lora_thread_handle,		PRO_CPU);
 
 	// Deleting the spawner thread (setup thread).
 	vTaskDelete(NULL);
 }
 
-void sendAck() {
+void sendAck(){
 	notification.type = MessageType::ACK;
 	notification.sequence_number = last_sequence_number;
 
@@ -104,7 +94,7 @@ void servoWrite(uint8_t pin, uint16_t degrees){
 }
 
 // Process a LoRa packet and send notifications.
-void parseLoraPacket() {
+void parseLoraPacket(){
 	int packet_size = LoRa.parsePacket();
 	if (packet_size < 1) return;
 
@@ -142,38 +132,16 @@ void parseLoraPacket() {
 	}
 }
 
-void IRAM_ATTR button_reset_lever() {
-	// Handle button press event.
-	BaseType_t task_woken = pdFALSE;
-
-	// Deferred interrupt for sampling.
-	// If sample_thread can't handle the set speed,
-	// this error will be printed out.
-	if(xSemaphoreGiveFromISR(sem_button_pressed, &task_woken) == errQUEUE_FULL)
-		Serial.println("errQUEUE_FULL in xSemaphoreGiveFromISR.");
-
-	// API to implement deferred interrupt.
-	// Exit from ISR (Vanilla FreeRTOS).
-	// portYIELD_FROM_ISR(task_woken);
-
-	// Exit from ISR (ESP-IDF).
-	if(task_woken)
-		portYIELD_FROM_ISR();
-}
-
 void loop(){}
 void setup(){
 	Serial.begin(115200);
+
 	pinMode(BUTTON_PIN, INPUT_PULLUP);
-	attachInterrupt(BUTTON_PIN, button_reset_lever, FALLING);
-	interrupts();
+	servoWrite(SERVO_PIN, SERVO_90);
 
-	servoWrite(SERVO_PIN, SERVO_0);
+	// initializeSecureClient();
+	// initializeLoraModule();
 
-	initializeSecureClient();
-	initializeLoraModule();
-
-	setup_IPCs();
 	spawn_threads();
 }
 
@@ -181,8 +149,10 @@ void button_thread(void *parameters){
 	Serial.println("button_thread");
 
 	while(true){
-		// Wait for the call of xSemaphoreGiveFromISR from button_reset_lever.
-		xSemaphoreTake(sem_button_pressed, portMAX_DELAY);
+		// Wait for the call of xSemaphoreGiveFromISR from button_ISR.
+		Serial.println("await button.");
+		while(digitalRead(BUTTON_PIN))
+			vTaskDelay(1000 / portTICK_PERIOD_MS);
 
 		Serial.println("button pressed.");
 		servoWrite(SERVO_PIN, SERVO_0);
