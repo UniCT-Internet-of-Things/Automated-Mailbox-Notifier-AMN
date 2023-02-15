@@ -9,7 +9,7 @@ Display::Display(): display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RST) {
     }
 }
 
-void Display::writeLine(int x, int y, int size, char* message, int line) {
+void Display::writeLine(int x, int y, int size, const char* message, int line) {
     display.setTextColor(WHITE);
     display.setCursor(x,y);
     while(line-- > 0) display.println();

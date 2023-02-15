@@ -20,7 +20,7 @@ class Display {
     public:
         Display();
 
-        void writeLine(int x, int y, int size, char* message, int line);
+        void writeLine(int x, int y, int size, const char* message, int line);
 
         void clear();
 };

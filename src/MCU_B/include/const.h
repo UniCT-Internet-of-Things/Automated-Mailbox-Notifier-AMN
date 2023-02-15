@@ -1,14 +1,9 @@
-#define BUTTON_PIN 12
-#define SERVOM_PIN 13
+#define BUTTON_PIN	14
+#define SERVO_PIN		13
 
 // Protocol CPU and app CPU.
 #define PRO_CPU 0
 #define APP_CPU 1
-
-#define WIFI_SSID     "UniCT-Team-Public"
-#define WIFI_PASSWORD "LabROBO21/22"
-#define BOT_TOKEN     "5929068700:AAFJDBkTw_gdDYUl7I49odcHczCgfGEwyp0"
-#define CHAT_ID       "-654142822"
 
 #define SCK   5
 #define MISO  19
